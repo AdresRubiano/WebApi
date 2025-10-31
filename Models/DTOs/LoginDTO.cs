@@ -2,7 +2,7 @@
 {
     public class LoginDTO
     {
-        public string Correo { get; set; }
-        public string PasswordHash { get; set; }
+        public required string Correo { get; set; }
+        public required string PasswordHash { get; set; }
     }
 }

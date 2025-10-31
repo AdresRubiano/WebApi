@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using WebApi.Custom;
 using WebApi.Models;
+using WebApi.Services;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,14 +18,15 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 
-// Configuración de DbContext con SQL Server
+// Configuraciï¿½n de DbContext con SQL Server
 builder.Services.AddDbContext<DbMasterContext>(options =>
 {
     options.UseSqlServer(builder.Configuration.GetConnectionString("CadenaSQL"));
 });
 
-// 
+// Servicios personalizados
 builder.Services.AddSingleton<Utilidades>();
+builder.Services.AddScoped<IS3Service, S3Service>();
 
 
 
@@ -68,8 +70,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-app.UseSwagger();
-app.UseSwaggerUI();
+
 app.UseCors("NewPolicy");
 app.UseAuthentication();
 app.UseAuthorization();

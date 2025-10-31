@@ -1,9 +1,9 @@
-﻿    namespace WebApi.Models.DTOs
+﻿namespace WebApi.Models.DTOs
 {
     public class PublicacionDTO
     {
-        public string Titulo { get; set; }
-        public string Contenido { get; set; }
+        public required string Titulo { get; set; }
+        public required string Contenido { get; set; }
         public string? Etiquetas { get; set; }
         public string? ImagenUrl { get; set; }
         public int IdUsuario { get; set; }
