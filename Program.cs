@@ -65,10 +65,14 @@ builder.Services.AddCors(option =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+// Habilitar archivos estáticos para la interfaz personalizada
+app.UseStaticFiles();
+
+// Mantener Swagger solo para generar el JSON de OpenAPI (sin UI)
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    // Swagger UI removido - usando interfaz personalizada
 }
 
 app.UseCors("NewPolicy");
@@ -76,5 +80,20 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Mapear ruta raíz a la interfaz personalizada
+app.MapGet("/", async context =>
+{
+    context.Response.ContentType = "text/html";
+    var filePath = Path.Combine(app.Environment.WebRootPath ?? "wwwroot", "index.html");
+    if (File.Exists(filePath))
+    {
+        await context.Response.SendFileAsync(filePath);
+    }
+    else
+    {
+        await context.Response.WriteAsync("<h1>API Blog - Interfaz no encontrada</h1>");
+    }
+});
 
 app.Run();
