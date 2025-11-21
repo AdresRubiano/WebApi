@@ -228,6 +228,77 @@ namespace WebApi.Controllers
         }
 
         /// <summary>
+        /// Obtiene el feed de publicaciones de los usuarios que sigue el usuario autenticado
+        /// </summary>
+        [HttpGet]
+        [Route("Feed")]
+        public async Task<IActionResult> ObtenerFeed()
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst("idUsuario")?.Value;
+                if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+                {
+                    return Unauthorized(new { isSuccess = false, mensaje = "No se pudo validar el usuario" });
+                }
+
+                // Obtener IDs de usuarios que sigue
+                var usuariosSeguidos = await _dbMasterContext.Seguidores
+                    .Where(s => s.IdUsuario == userId)
+                    .Select(s => s.IdSeguido)
+                    .ToListAsync();
+
+                if (!usuariosSeguidos.Any())
+                {
+                    return Ok(new { isSuccess = true, data = new List<object>(), total = 0, mensaje = "No sigues a ningún usuario aún" });
+                }
+
+                var publicaciones = await _dbMasterContext.Publicaciones
+                    .Where(p => usuariosSeguidos.Contains(p.IdUsuario) && p.Estado == "Publicado")
+                    .Include(p => p.IdUsuarioNavigation)
+                    .Include(p => p.IdCategoriaNavigation)
+                    .OrderByDescending(p => p.FechaPublicacion)
+                    .Select(p => new
+                    {
+                        p.IdPublicacion,
+                        p.Titulo,
+                        p.Contenido,
+                        p.Etiquetas,
+                        p.ImagenUrl,
+                        p.FechaPublicacion,
+                        p.FechaActualizacion,
+                        Usuario = new
+                        {
+                            p.IdUsuarioNavigation.IdUsuario,
+                            p.IdUsuarioNavigation.Nombre,
+                            p.IdUsuarioNavigation.Username,
+                            p.IdUsuarioNavigation.FotoPerfil
+                        },
+                        Categoria = p.IdCategoriaNavigation != null ? new
+                        {
+                            p.IdCategoriaNavigation.IdCategoria,
+                            p.IdCategoriaNavigation.Nombre
+                        } : null,
+                        TotalComentarios = p.Comentarios.Count,
+                        TotalReacciones = p.Reacciones.Count
+                    })
+                    .Take(50)
+                    .ToListAsync();
+
+                return Ok(new { isSuccess = true, data = publicaciones, total = publicaciones.Count });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener feed de publicaciones");
+                return StatusCode(500, new
+                {
+                    isSuccess = false,
+                    mensaje = "Error interno del servidor al obtener el feed"
+                });
+            }
+        }
+
+        /// <summary>
         /// Lista las publicaciones del usuario autenticado
         /// </summary>
         [HttpGet]
@@ -592,6 +663,270 @@ namespace WebApi.Controllers
                     isSuccess = false,
                     isValid = false,
                     mensaje = "Error interno del servidor al validar la imagen"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Lista publicaciones por categoría
+        /// </summary>
+        [HttpGet]
+        [Route("PorCategoria/{idCategoria}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ListarPublicacionesPorCategoria(int idCategoria)
+        {
+            try
+            {
+                var categoriaExiste = await _dbMasterContext.Categorias.FindAsync(idCategoria);
+                if (categoriaExiste == null)
+                {
+                    return NotFound(new { isSuccess = false, mensaje = "La categoría no existe" });
+                }
+
+                var publicaciones = await _dbMasterContext.Publicaciones
+                    .Where(p => p.IdCategoria == idCategoria && p.Estado == "Publicado")
+                    .Include(p => p.IdUsuarioNavigation)
+                    .Include(p => p.IdCategoriaNavigation)
+                    .OrderByDescending(p => p.FechaPublicacion)
+                    .Select(p => new
+                    {
+                        p.IdPublicacion,
+                        p.Titulo,
+                        p.Contenido,
+                        p.Etiquetas,
+                        p.ImagenUrl,
+                        p.Estado,
+                        p.FechaPublicacion,
+                        p.FechaActualizacion,
+                        Usuario = new
+                        {
+                            p.IdUsuarioNavigation.IdUsuario,
+                            p.IdUsuarioNavigation.Nombre,
+                            p.IdUsuarioNavigation.Username,
+                            p.IdUsuarioNavigation.FotoPerfil
+                        },
+                        Categoria = new
+                        {
+                            p.IdCategoriaNavigation!.IdCategoria,
+                            p.IdCategoriaNavigation.Nombre
+                        },
+                        TotalComentarios = p.Comentarios.Count,
+                        TotalReacciones = p.Reacciones.Count
+                    })
+                    .ToListAsync();
+
+                return Ok(new { isSuccess = true, data = publicaciones, total = publicaciones.Count });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al listar publicaciones por categoría {IdCategoria}", idCategoria);
+                return StatusCode(500, new
+                {
+                    isSuccess = false,
+                    mensaje = "Error interno del servidor al listar las publicaciones"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Busca publicaciones por término (título, contenido o etiquetas)
+        /// </summary>
+        [HttpGet]
+        [Route("Buscar")]
+        [AllowAnonymous]
+        public async Task<IActionResult> BuscarPublicaciones([FromQuery] string? termino)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(termino))
+                {
+                    return BadRequest(new { isSuccess = false, mensaje = "El término de búsqueda es requerido" });
+                }
+
+                var publicaciones = await _dbMasterContext.Publicaciones
+                    .Where(p => p.Estado == "Publicado" &&
+                                (p.Titulo.Contains(termino) || 
+                                 p.Contenido.Contains(termino) || 
+                                 (p.Etiquetas != null && p.Etiquetas.Contains(termino))))
+                    .Include(p => p.IdUsuarioNavigation)
+                    .Include(p => p.IdCategoriaNavigation)
+                    .OrderByDescending(p => p.FechaPublicacion)
+                    .Select(p => new
+                    {
+                        p.IdPublicacion,
+                        p.Titulo,
+                        p.Contenido,
+                        p.Etiquetas,
+                        p.ImagenUrl,
+                        p.FechaPublicacion,
+                        Usuario = new
+                        {
+                            p.IdUsuarioNavigation.IdUsuario,
+                            p.IdUsuarioNavigation.Nombre,
+                            p.IdUsuarioNavigation.Username
+                        },
+                        Categoria = p.IdCategoriaNavigation != null ? new
+                        {
+                            p.IdCategoriaNavigation.IdCategoria,
+                            p.IdCategoriaNavigation.Nombre
+                        } : null,
+                        TotalComentarios = p.Comentarios.Count,
+                        TotalReacciones = p.Reacciones.Count
+                    })
+                    .Take(50)
+                    .ToListAsync();
+
+                return Ok(new { isSuccess = true, data = publicaciones, total = publicaciones.Count });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al buscar publicaciones");
+                return StatusCode(500, new
+                {
+                    isSuccess = false,
+                    mensaje = "Error interno del servidor al buscar publicaciones"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Obtiene las publicaciones más populares (por número de reacciones)
+        /// </summary>
+        [HttpGet]
+        [Route("Populares")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ObtenerPublicacionesPopulares([FromQuery] int limite = 10)
+        {
+            try
+            {
+                if (limite < 1 || limite > 50)
+                {
+                    limite = 10;
+                }
+
+                var publicaciones = await _dbMasterContext.Publicaciones
+                    .Where(p => p.Estado == "Publicado")
+                    .Include(p => p.IdUsuarioNavigation)
+                    .Include(p => p.IdCategoriaNavigation)
+                    .OrderByDescending(p => p.Reacciones.Count)
+                    .ThenByDescending(p => p.FechaPublicacion)
+                    .Select(p => new
+                    {
+                        p.IdPublicacion,
+                        p.Titulo,
+                        p.Contenido,
+                        p.Etiquetas,
+                        p.ImagenUrl,
+                        p.FechaPublicacion,
+                        Usuario = new
+                        {
+                            p.IdUsuarioNavigation.IdUsuario,
+                            p.IdUsuarioNavigation.Nombre,
+                            p.IdUsuarioNavigation.Username,
+                            p.IdUsuarioNavigation.FotoPerfil
+                        },
+                        Categoria = p.IdCategoriaNavigation != null ? new
+                        {
+                            p.IdCategoriaNavigation.IdCategoria,
+                            p.IdCategoriaNavigation.Nombre
+                        } : null,
+                        TotalComentarios = p.Comentarios.Count,
+                        TotalReacciones = p.Reacciones.Count
+                    })
+                    .Take(limite)
+                    .ToListAsync();
+
+                return Ok(new { isSuccess = true, data = publicaciones, total = publicaciones.Count });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener publicaciones populares");
+                return StatusCode(500, new
+                {
+                    isSuccess = false,
+                    mensaje = "Error interno del servidor al obtener las publicaciones populares"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Obtiene una publicación con todos sus detalles (comentarios y reacciones)
+        /// </summary>
+        [HttpGet]
+        [Route("Detalle/{id}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ObtenerPublicacionDetalle(int id)
+        {
+            try
+            {
+                var publicacion = await _dbMasterContext.Publicaciones
+                    .Where(p => p.IdPublicacion == id && p.Estado == "Publicado")
+                    .Include(p => p.IdUsuarioNavigation)
+                    .Include(p => p.IdCategoriaNavigation)
+                    .Include(p => p.Comentarios)
+                        .ThenInclude(c => c.IdUsuarioNavigation)
+                    .Include(p => p.Reacciones)
+                        .ThenInclude(r => r.IdUsuarioNavigation)
+                    .Select(p => new
+                    {
+                        p.IdPublicacion,
+                        p.Titulo,
+                        p.Contenido,
+                        p.Etiquetas,
+                        p.ImagenUrl,
+                        p.FechaPublicacion,
+                        p.FechaActualizacion,
+                        Usuario = new
+                        {
+                            p.IdUsuarioNavigation.IdUsuario,
+                            p.IdUsuarioNavigation.Nombre,
+                            p.IdUsuarioNavigation.Username,
+                            p.IdUsuarioNavigation.FotoPerfil
+                        },
+                        Categoria = p.IdCategoriaNavigation != null ? new
+                        {
+                            p.IdCategoriaNavigation.IdCategoria,
+                            p.IdCategoriaNavigation.Nombre
+                        } : null,
+                        Comentarios = p.Comentarios.OrderByDescending(c => c.FechaComentario).Select(c => new
+                        {
+                            c.IdComentario,
+                            c.Comentario1,
+                            c.FechaComentario,
+                            c.Editado,
+                            Usuario = new
+                            {
+                                c.IdUsuarioNavigation.IdUsuario,
+                                c.IdUsuarioNavigation.Nombre,
+                                c.IdUsuarioNavigation.Username,
+                                c.IdUsuarioNavigation.FotoPerfil
+                            },
+                            TotalReacciones = c.Reacciones.Count
+                        }).ToList(),
+                        Reacciones = p.Reacciones.GroupBy(r => r.Tipo).Select(g => new
+                        {
+                            Tipo = g.Key,
+                            Cantidad = g.Count()
+                        }).ToList(),
+                        TotalComentarios = p.Comentarios.Count,
+                        TotalReacciones = p.Reacciones.Count
+                    })
+                    .FirstOrDefaultAsync();
+
+                if (publicacion == null)
+                {
+                    return NotFound(new { isSuccess = false, mensaje = "La publicación no existe o no está publicada" });
+                }
+
+                return Ok(new { isSuccess = true, data = publicacion });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al obtener detalle de publicación {Id}", id);
+                return StatusCode(500, new
+                {
+                    isSuccess = false,
+                    mensaje = "Error interno del servidor al obtener el detalle de la publicación"
                 });
             }
         }
